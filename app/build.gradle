@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.xadan.flinq'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.xadan.flinq"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-messaging'
+}
+
+// FCM için app/google-services.json gerekir (Firebase konsolundan indirilir).
+// Dosya yoksa uygulama yine derlenir; sadece push devre dışı kalır.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}

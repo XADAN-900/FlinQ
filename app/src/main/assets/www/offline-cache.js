@@ -111,6 +111,9 @@
         } else if (el) {
             el.remove();
         }
+        // Bildirimler (toast) şeridin altından başlasın, şerit onları kapatmasın
+        const cur = document.getElementById(ID);
+        document.documentElement.style.setProperty('--banner-h', cur ? cur.offsetHeight + 'px' : '0px');
     }
     window.addEventListener('offline', update);
     window.addEventListener('online', update);

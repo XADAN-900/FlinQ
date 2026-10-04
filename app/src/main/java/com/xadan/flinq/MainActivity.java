@@ -301,17 +301,9 @@ public class MainActivity extends Activity {
 
     /** Kullanım sırasında internet giderse üstte kırmızı uyarı şeridi gösterir. */
     private void setOfflineBanner(boolean show) {
+        // Şeridi sayfadaki JS (offline-cache.js) çizer; burada sadece durumu bildiririz.
         String js = "window.__ffOffline=" + (show ? "true" : "false") + ";"
-                + "(function(){var id='ff-offline-banner';var e=document.getElementById(id);"
-                + (show
-                ? "if(!e){e=document.createElement('div');e.id=id;"
-                + "e.textContent='\\u0130nternet ba\\u011flant\\u0131s\\u0131 yok';"
-                + "e.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483647;"
-                + "background:#d32f2f;color:#fff;text-align:center;font:600 14px sans-serif;"
-                + "padding:8px;padding-top:max(8px,env(safe-area-inset-top))';"
-                + "document.body.appendChild(e);}"
-                : "if(e)e.remove();")
-                + "})();";
+                + "if(window.__updateOfflineBanner)window.__updateOfflineBanner();";
         runJs(js);
     }
 

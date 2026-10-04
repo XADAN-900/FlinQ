@@ -2354,6 +2354,20 @@
         .feed-video-mute-btn:hover {
             background: rgba(0, 0, 0, 0.75);
         }
+    
+        /* ÇEVRİMDIŞI ŞERİDİ: şerit varken sayfa şeridin altına yerleşir, üstteki butonlar kapanmaz */
+        html.has-offline-banner body {
+            padding-top: var(--banner-h, 0px);
+            box-sizing: border-box;
+        }
+        html.has-offline-banner .auth-container {
+            top: var(--banner-h, 0px);
+        }
+        html.has-offline-banner .right-panel {
+            top: var(--banner-h, 0px);
+            height: calc(100vh - var(--banner-h, 0px));
+            height: calc(100dvh - var(--banner-h, 0px));
+        }
     </style>
 </head>
 <body class="app-loading dark-theme">

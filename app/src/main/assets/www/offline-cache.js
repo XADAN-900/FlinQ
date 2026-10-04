@@ -111,10 +111,12 @@
         } else if (el) {
             el.remove();
         }
-        // Bildirimler (toast) şeridin altından başlasın, şerit onları kapatmasın
+        // Şerit varken sayfa içeriği ve bildirimler (toast) şeridin altından başlasın
         const cur = document.getElementById(ID);
+        document.documentElement.classList.toggle('has-offline-banner', !!cur);
         document.documentElement.style.setProperty('--banner-h', cur ? cur.offsetHeight + 'px' : '0px');
     }
+    window.__updateOfflineBanner = update;
     window.addEventListener('offline', update);
     window.addEventListener('online', update);
     document.addEventListener('DOMContentLoaded', update);

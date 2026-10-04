@@ -7,12 +7,13 @@
     
     <!-- Fonts & Icons -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="lib/fa/css/all.min.css">
     
     <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="offline-cache.js"></script>
+    <script src="lib/firebase-app-compat.js"></script>
+    <script src="lib/firebase-auth-compat.js"></script>
+    <script src="lib/firebase-database-compat.js"></script>
     
     <style>
         * {
@@ -3888,9 +3889,12 @@
                 loadNotifications();
 
                 try {
-                    await Promise.all([
-                        loadUserData(),
-                        loadPosts()
+                    await Promise.race([
+                        Promise.all([
+                            loadUserData(),
+                            loadPosts()
+                        ]),
+                        new Promise(resolve => setTimeout(resolve, 8000))
                     ]);
                 } catch (error) {
                     console.error('Açılış verisi yüklenirken hata:', error);
@@ -3916,9 +3920,10 @@
 
         async function loadUserData() {
             if (!currentUser) return;
+            if (window.isOfflineNow()) return;
             
             try {
-                const snapshot = await db.ref('users/' + currentUser.uid).once('value');
+                const snapshot = await withTimeout(db.ref('users/' + currentUser.uid).once('value'), 7000);
                 const userData = snapshot.val();
                 
                 if (userData && userData.profilePhotoUrl) {
@@ -3963,6 +3968,12 @@
             
             if (!email || !password) {
                 document.getElementById('login-error').textContent = 'E-posta ve şifre girin!';
+                document.getElementById('login-error').style.display = 'block';
+                return;
+            }
+
+            if (window.isOfflineNow()) {
+                document.getElementById('login-error').textContent = 'İnternet bağlantısı yok. Giriş için internete bağlan.';
                 document.getElementById('login-error').style.display = 'block';
                 return;
             }
@@ -4050,6 +4061,7 @@
         document.getElementById('logoutBtn').addEventListener('click', async () => {
             const onaylandi = await showConfirm('Çıkış yapmak istediğinize emin misiniz?', 'Çıkış Yap');
             if (!onaylandi) return;
+            if (window.FFCache) await FFCache.clearAll();
             await auth.signOut();
             showToast('Çıkış yapıldı', 'success');
         });
@@ -4190,7 +4202,8 @@
 
         async function loadComments(postId) {
             try {
-                const snapshot = await db.ref('posts/' + postId + '/comments').once('value');
+                if (window.isOfflineNow()) throw new Error('offline');
+                const snapshot = await withTimeout(db.ref('posts/' + postId + '/comments').once('value'), 8000);
                 const comments = snapshot.val() || {};
                 
                 let html = '';
@@ -4262,9 +4275,15 @@
                 
                 document.getElementById('comments-list').innerHTML = html;
                 document.getElementById('comment-input').value = '';
+                if (window.FFCache && Object.keys(comments).length > 0) FFCache.putComments(postId, html);
                 
             } catch(error) {
                 console.error('Yorum yükleme hatası:', error);
+                const cachedComments = window.FFCache ? await FFCache.getComments(postId) : null;
+                if (cachedComments) {
+                    document.getElementById('comments-list').innerHTML = cachedComments;
+                    return;
+                }
                 document.getElementById('comments-list').innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-exclamation-circle"></i>
@@ -4414,7 +4433,8 @@
             const mainContent = document.getElementById('main-content');
             
             try {
-                const snapshot = await db.ref('posts').orderByChild('timestamp').limitToLast(20).once('value');
+                if (window.isOfflineNow()) throw new Error('offline');
+                const snapshot = await withTimeout(db.ref('posts').orderByChild('timestamp').limitToLast(20).once('value'), 8000);
                 const postsData = snapshot.val() || {};
                 
                 const posts = Object.keys(postsData).map(key => ({
@@ -4535,9 +4555,17 @@
                 mainContent.innerHTML = html;
                 initLazyVideoObserver();
                 initMediaAspectRatios();
+                if (window.FFCache && validPosts.length > 0) FFCache.put('feed', html);
                 
             } catch(error) {
                 console.error('Feed yükleme hatası:', error);
+                const cachedFeed = window.FFCache ? await FFCache.get('feed') : null;
+                if (cachedFeed) {
+                    mainContent.innerHTML = cachedFeed;
+                    initLazyVideoObserver();
+                    initMediaAspectRatios();
+                    return;
+                }
                 mainContent.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-exclamation-circle"></i>

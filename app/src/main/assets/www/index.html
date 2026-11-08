@@ -2801,6 +2801,44 @@
                         </label>
                     </div>
                 </div>
+
+                <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-light); padding-top: 1.5rem;">
+                    <h4 style="margin-bottom: 1rem; color: var(--flinq-primary); font-size: 1.1rem;"><i class="fas fa-bell"></i> Bildirimler</h4>
+                    <div class="autoplay-setting-row" style="margin-bottom: 1rem;">
+                        <div class="autoplay-setting-text">
+                            <h4>Telefon bildirimleri</h4>
+                            <p>Uygulama kapalıyken de beğeni, yorum ve takip bildirimleri gelsin</p>
+                        </div>
+                        <label class="autoplay-switch">
+                            <input type="checkbox" id="notifEnabledToggle" checked>
+                            <span class="autoplay-switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="autoplay-setting-row" style="margin-bottom: 1rem;">
+                        <div class="autoplay-setting-text">
+                            <h4>Bildirim sesi</h4>
+                            <p>Yeni bildirim gelince kısa bir ses çalsın</p>
+                        </div>
+                        <label class="autoplay-switch">
+                            <input type="checkbox" id="notifSoundToggle" checked>
+                            <span class="autoplay-switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="autoplay-setting-row android-only" style="margin-bottom: 1rem; display:none;">
+                        <div class="autoplay-setting-text">
+                            <h4>Kilit ekranında içerik</h4>
+                            <p>Kapalıysa kilit ekranında sadece "Yeni bildirim" yazar</p>
+                        </div>
+                        <label class="autoplay-switch">
+                            <input type="checkbox" id="notifPreviewToggle" checked>
+                            <span class="autoplay-switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="android-only" style="display:none; gap:0.6rem;">
+                        <button type="button" id="notifTestBtn" style="flex:1; background: var(--bg-soft); border: 1px solid var(--border-medium); padding: 0.7rem; border-radius: 60px; cursor: pointer;"><i class="fas fa-paper-plane"></i> Bildirimi dene</button>
+                        <button type="button" id="notifSystemBtn" style="flex:1; background: var(--bg-soft); border: 1px solid var(--border-medium); padding: 0.7rem; border-radius: 60px; cursor: pointer;"><i class="fas fa-mobile-alt"></i> Telefon ayarları</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -2918,7 +2956,9 @@
                 </div>
             `;
             
-            setTimeout(() => {
+            // önceki zamanlayıcıyı iptal et: art arda gelen bildirimler erken kapanmasın
+            clearTimeout(showToast._t);
+            showToast._t = setTimeout(() => {
                 toast.style.display = 'none';
             }, 3000);
         }
@@ -3004,7 +3044,7 @@
                 
                 if (userId === currentUser?.uid) {
                     loadNotifications();
-                    showToast(notification.message, 'info', 'Yeni Bildirim');
+                    showToast(safeNotifHtml(notification.message), 'info', 'Yeni Bildirim');
                 }
             } catch(error) {
                 console.error('Bildirim ekleme hatası:', error);
@@ -3031,11 +3071,11 @@
 
                 let message;
                 if (context.type === 'comment') {
-                    message = `<strong>${fromUsername}</strong> bir yorumda seni etiketledi`;
+                    message = `<strong>${escapeHtml(fromUsername)}</strong> bir yorumda seni etiketledi`;
                 } else if (context.type === 'post') {
-                    message = `<strong>${fromUsername}</strong> bir gönderide seni etiketledi`;
+                    message = `<strong>${escapeHtml(fromUsername)}</strong> bir gönderide seni etiketledi`;
                 } else {
-                    message = `<strong>${fromUsername}</strong> seni etiketledi`;
+                    message = `<strong>${escapeHtml(fromUsername)}</strong> seni etiketledi`;
                 }
 
                 await addNotification(taggedUser.uid, {
@@ -3123,7 +3163,7 @@
                             <i class="fas ${icon}" style="color: white;"></i>
                         </div>
                         <div class="notification-content">
-                            <div class="notification-text">${notif.message}</div>
+                            <div class="notification-text">${safeNotifHtml(notif.message)}</div>
                             <div class="notification-time">${time}</div>
                         </div>
                         ${!notif.read ? '<span class="notification-dot"></span>' : ''}
@@ -3346,7 +3386,72 @@
             return String(str)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Bildirim metnini güvenli HTML'e çevirir: sadece <strong> kalır, geri kalan her şey düz metin.
+        // (Kullanıcı adı veya yorum içindeki <img onerror=...> gibi kodlar artık çalışmaz; eski kayıtlar da korunur.)
+        function safeNotifHtml(html) {
+            try {
+                const doc = new DOMParser().parseFromString('<div>' + String(html || '') + '</div>', 'text/html');
+                let out = '';
+                const walk = (node) => {
+                    node.childNodes.forEach(ch => {
+                        if (ch.nodeType === 3) out += escapeHtml(ch.textContent);
+                        else if (ch.nodeType === 1) {
+                            const bold = ch.tagName === 'STRONG' || ch.tagName === 'B';
+                            if (bold) out += '<strong>';
+                            walk(ch);
+                            if (bold) out += '</strong>';
+                        }
+                    });
+                };
+                walk(doc.body.firstChild);
+                return out;
+            } catch (e) {
+                return escapeHtml(String(html || '').replace(/<[^>]*>/g, ''));
+            }
+        }
+
+        // Kullanıcı adı kuralı: 3-20 karakter, harf/rakam/alt çizgi (Türkçe harfler dahil).
+        // Nokta, boşluk, / # $ [ ] gibi karakterler veritabanı yolunu bozuyordu.
+        const USERNAME_RE = /^[A-Za-z0-9_çğıöşüÇĞİÖŞÜ]{3,20}$/;
+        function usernameError(name) {
+            if (!USERNAME_RE.test(name)) return 'Kullanıcı adı 3-20 karakter olmalı; sadece harf, rakam ve _ kullanılabilir.';
+            return '';
+        }
+
+        // ---------- Bildirim tercihleri (cihazda saklanır, Android'e de iletilir) ----------
+        const NOTIF_PREFS_KEY = 'flinq_notif_prefs';
+        function flinqNotifPrefs() {
+            let p = {};
+            try { p = JSON.parse(localStorage.getItem(NOTIF_PREFS_KEY) || '{}') || {}; } catch (e) {}
+            return { enabled: p.enabled !== false, sound: p.sound !== false, preview: p.preview !== false };
+        }
+        function saveFlinqNotifPrefs(p) {
+            try { localStorage.setItem(NOTIF_PREFS_KEY, JSON.stringify(p)); } catch (e) {}
+            try { if (window.FlinqAndroid && FlinqAndroid.setPrefs) FlinqAndroid.setPrefs(p.enabled, p.sound, p.preview); } catch (e) {}
+        }
+
+        // Kısa "pop" bildirim sesi (harici dosya gerekmez)
+        let notifyAudioCtx = null;
+        function playNotifySound() {
+            try {
+                notifyAudioCtx = notifyAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (notifyAudioCtx.state === 'suspended') notifyAudioCtx.resume().catch(() => {});
+                const now = notifyAudioCtx.currentTime;
+                [[1046.5, 0], [1318.5, 0.07], [1568, 0.14]].forEach(([f, d]) => {
+                    const o = notifyAudioCtx.createOscillator(), g = notifyAudioCtx.createGain();
+                    o.type = 'sine'; o.frequency.value = f;
+                    g.gain.setValueAtTime(0, now + d);
+                    g.gain.linearRampToValueAtTime(0.14, now + d + 0.01);
+                    g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.32);
+                    o.connect(g); g.connect(notifyAudioCtx.destination);
+                    o.start(now + d); o.stop(now + d + 0.34);
+                });
+            } catch (e) {}
         }
 
         function formatCaptionWithHashtags(caption) {
@@ -3958,9 +4063,27 @@
                 db.ref('notifications/' + uid).off('value', notificationsListener);
             }
             
+            let firstSnapshot = true;
+            const knownIds = new Set();
             notificationsListener = db.ref('notifications/' + uid).on('value', (snapshot) => {
-                if (currentUser?.uid === uid) {
-                    loadNotifications();
+                if (currentUser?.uid !== uid) return;
+                loadNotifications();
+                // Uygulama açıkken başkasından YENİ bildirim gelirse: ses + üstte kısa bildirim
+                const all = snapshot.val() || {};
+                const fresh = [];
+                Object.keys(all).forEach(id => {
+                    if (!knownIds.has(id)) {
+                        knownIds.add(id);
+                        const n = all[id];
+                        if (!firstSnapshot && n && !n.read && n.from !== uid) fresh.push(n);
+                    }
+                });
+                firstSnapshot = false;
+                if (fresh.length && !document.hidden) {
+                    const n = fresh.sort((a, b) => (b.time || 0) - (a.time || 0))[0];
+                    if (flinqNotifPrefs().sound) playNotifySound();
+                    if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) {} }
+                    showToast(safeNotifHtml(n.message), 'info', fresh.length > 1 ? fresh.length + ' yeni bildirim' : 'Yeni bildirim');
                 }
             });
         }
@@ -4011,6 +4134,12 @@
             
             if (!username || !email || !password) {
                 document.getElementById('register-error').textContent = 'Tüm alanları doldurun!';
+                document.getElementById('register-error').style.display = 'block';
+                return;
+            }
+
+            if (usernameError(username)) {
+                document.getElementById('register-error').textContent = usernameError(username);
                 document.getElementById('register-error').style.display = 'block';
                 return;
             }
@@ -4388,7 +4517,7 @@
                     if (parentComment && parentComment.uid !== currentUser.uid) {
                         await addNotification(parentComment.uid, {
                             type: 'reply',
-                            message: `<strong>${username}</strong> yorumuna yanıt verdi: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
+                            message: `<strong>${escapeHtml(username)}</strong> yorumuna yanıt verdi: "${escapeHtml(content.substring(0, 30))}${content.length > 30 ? '...' : ''}"`,
                             from: currentUser.uid,
                             postId: currentPostForComments,
                             commentId: parentCommentId,
@@ -4423,7 +4552,7 @@
                 if (post && post.uid !== currentUser.uid) {
                     await addNotification(post.uid, {
                         type: 'comment',
-                        message: `<strong>${username}</strong> gönderine yorum yaptı: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
+                        message: `<strong>${escapeHtml(username)}</strong> gönderine yorum yaptı: "${escapeHtml(content.substring(0, 30))}${content.length > 30 ? '...' : ''}"`,
                         from: currentUser.uid,
                         postId: currentPostForComments,
                         commentId: commentId
@@ -4647,7 +4776,7 @@
                         const username = currentUser.displayName || currentUser.email.split('@')[0] || 'Kullanıcı';
                         await addNotification(post.uid, {
                             type: 'like',
-                            message: `<strong>${username}</strong> gönderini beğendi`,
+                            message: `<strong>${escapeHtml(username)}</strong> gönderini beğendi`,
                             from: currentUser.uid,
                             postId: postId
                         });
@@ -4857,7 +4986,7 @@
                     const username = currentUser.displayName || currentUser.email.split('@')[0] || 'Kullanıcı';
                     await addNotification(targetUserId, {
                         type: 'follow',
-                        message: `<strong>${username}</strong> seni takip etmeye başladı`,
+                        message: `<strong>${escapeHtml(username)}</strong> seni takip etmeye başladı`,
                         from: currentUser.uid
                     });
                     
@@ -5773,6 +5902,10 @@
                 showToast('Lütfen yeni bir kullanıcı adı girin.', 'error');
                 return;
             }
+            if (usernameError(newUsername)) {
+                showToast(usernameError(newUsername), 'error');
+                return;
+            }
 
             try {
                 const userRef = db.ref('users/' + currentUser.uid);
@@ -5912,6 +6045,35 @@
                 handleVideoPlay(e.target);
             }
         }, true);
-    </script>
+    
+        // ---------- Bildirim ayarları ----------
+        (function initNotifSettings() {
+            const isAndroid = !!window.FlinqAndroid;
+            document.querySelectorAll('.android-only').forEach(el => { if (isAndroid) el.style.display = el.tagName === 'DIV' && !el.classList.contains('autoplay-setting-row') ? 'flex' : ''; });
+            const en = document.getElementById('notifEnabledToggle');
+            const snd = document.getElementById('notifSoundToggle');
+            const prev = document.getElementById('notifPreviewToggle');
+            if (!en || !snd || !prev) return;
+            const p = flinqNotifPrefs();
+            en.checked = p.enabled; snd.checked = p.sound; prev.checked = p.preview;
+            const save = () => saveFlinqNotifPrefs({ enabled: en.checked, sound: snd.checked, preview: prev.checked });
+            [en, snd, prev].forEach(el => el.addEventListener('change', () => { save(); showToast('Bildirim ayarı kaydedildi', 'success'); }));
+            const test = document.getElementById('notifTestBtn');
+            if (test) test.addEventListener('click', () => { save(); try { FlinqAndroid.testNotification(); } catch (e) {} });
+            const sys = document.getElementById('notifSystemBtn');
+            if (sys) sys.addEventListener('click', () => { try { FlinqAndroid.openNotificationSettings(); } catch (e) {} });
+            if (isAndroid) {
+                // tercihleri Android'e ilk açılışta da ilet
+                try { FlinqAndroid.setPrefs(p.enabled, p.sound, p.preview); } catch (e) {}
+                setTimeout(() => {
+                    try {
+                        if (FlinqAndroid.notificationsAllowed && !FlinqAndroid.notificationsAllowed() && auth.currentUser) {
+                            showToast('Telefon bildirimleri kapalı. Ayarlar > Bildirimler > Telefon ayarları’ndan açabilirsin.', 'error', 'Bildirimler kapalı');
+                        }
+                    } catch (e) {}
+                }, 6000);
+            }
+        })();
+</script>
 </body>
 </html>

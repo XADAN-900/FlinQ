@@ -22,10 +22,38 @@
   }
   syncToken();
   setInterval(syncToken, 5000);
+
+  // Oturumu Android'e ilet: uygulama kapalıyken bildirimleri dinleyen arka plan servisi
+  // bu kullanıcının bildirimlerini (yenileme anahtarıyla, kendi kimliğiyle) okur.
+  var lastSession = '';
+  function syncSession() {
+    try {
+      if (typeof FlinqAndroid.setSession !== 'function') return;
+      var u = firebase.auth().currentUser;
+      if (u && u.refreshToken) {
+        var sig = u.uid + '|' + u.refreshToken;
+        if (sig !== lastSession) {
+          lastSession = sig;
+          FlinqAndroid.setSession(String(u.uid), String(u.refreshToken));
+        }
+      } else if (!u && lastSession !== 'none' && lastSession !== '') {
+        lastSession = 'none';
+        FlinqAndroid.clearSession();
+      }
+    } catch (e) {}
+  }
+  syncSession();
+  setInterval(syncSession, 5000);
   try {
-    firebase.auth().onAuthStateChanged(function () {
+    firebase.auth().onAuthStateChanged(function (user) {
       lastWritten = '';
       setTimeout(syncToken, 500);
+      if (!user) {
+        lastSession = 'none';
+        try { FlinqAndroid.clearSession(); } catch (e) {}
+      } else {
+        setTimeout(syncSession, 300);
+      }
     });
   } catch (e) {}
 

@@ -18,7 +18,9 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.ViewGroup;
@@ -89,6 +91,8 @@ public class MainActivity extends Activity {
     };
 
     private String bridgeScript;
+    private boolean webReady = false;
+    private boolean pendingOpenNotifs = false;
     private ImageView splashView;
     private long createdAt;
 
@@ -147,6 +151,34 @@ public class MainActivity extends Activity {
         }, "flinq-server-start").start();
 
         registerNetworkWatcher();
+
+        // Giriş yapılmışsa arka plan bildirim dinleyicisini çalıştır
+        if (Session.load(this).valid()) KeepAliveService.ensureRunning(this);
+        handleIntent(getIntent());
+    }
+
+    // ---------- Bildirimden açılış: Bildirimler paneline git ----------
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null || !NotificationHelper.ACTION_OPEN_NOTIFS.equals(intent.getAction())) return;
+        pendingOpenNotifs = true;
+        if (webReady) openNotificationsInPage();
+    }
+
+    private void openNotificationsInPage() {
+        if (!pendingOpenNotifs) return;
+        pendingOpenNotifs = false;
+        // giriş/oturum yüklenene kadar kısa bir gecikmeyle dene
+        runJs("(function t(n){var b=document.getElementById('nav-notifications');"
+                + "if(b&&window.firebase&&firebase.auth().currentUser){b.click();}"
+                + "else if(n>0){setTimeout(function(){t(n-1);},700);}})(15);");
     }
 
     // ---------- İzinler ----------
@@ -377,6 +409,8 @@ public class MainActivity extends Activity {
                 hideSplash();
                 if (url != null && url.contains("localhost") && url.contains("index.html")) {
                     injectBridge(view);
+                    webReady = true;
+                    openNotificationsInPage();
                     if (knownOffline) setOfflineBanner(true);
                 }
             }
@@ -471,6 +505,82 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> loadStart());
         }
 
+        /**
+         * Web'deki Firebase oturumu: uid + yenileme anahtarı. Uygulama kapalıyken de bildirimleri
+         * canlı dinleyebilmek için arka plan servisine verilir.
+         */
+        @JavascriptInterface
+        public void setSession(String uid, String refreshToken) {
+            if (uid == null || uid.isEmpty() || refreshToken == null || refreshToken.isEmpty()) return;
+            android.content.Context app = getApplicationContext();
+            boolean first = !Session.load(app).valid();
+            if (Session.save(app, uid, refreshToken)) {
+                NotifWatcher.get(app).restart();
+            }
+            if (Session.load(app).enabled) KeepAliveService.ensureRunning(app);
+            if (first) askBatteryOptimization();
+        }
+
+        @JavascriptInterface
+        public void clearSession() {
+            android.content.Context app = getApplicationContext();
+            if (!Session.load(app).valid()) return;
+            Session.clear(app);
+            NotifWatcher.get(app).stop();
+            NotificationHelper.clearAll(app);
+            KeepAliveService.stop(app);
+        }
+
+        /** Bildirim tercihleri: açık/kapalı, ses, kilit ekranında içerik. */
+        @JavascriptInterface
+        public void setPrefs(boolean enabled, boolean sound, boolean preview) {
+            android.content.Context app = getApplicationContext();
+            Session.savePrefs(app, enabled, sound, preview);
+            if (!enabled) {
+                NotifWatcher.get(app).stop();
+                KeepAliveService.stop(app);
+            } else if (Session.load(app).valid()) {
+                KeepAliveService.ensureRunning(app);
+            }
+        }
+
+        @JavascriptInterface
+        public void testNotification() {
+            final android.content.Context app = getApplicationContext();
+            toast("5 saniye içinde örnek bildirim gelecek. İsterseniz ekranı kilitleyin.");
+            new Handler(Looper.getMainLooper()).postDelayed(() -> NotificationHelper.showTest(app), 5000);
+        }
+
+        @JavascriptInterface
+        public void openNotificationSettings() {
+            runOnUiThread(() -> {
+                try {
+                    Intent i;
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                    } else {
+                        i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:" + getPackageName()));
+                    }
+                    startActivity(i);
+                } catch (Exception e) {
+                    toast("Ayarlar açılamadı");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean notificationsAllowed() {
+            try {
+                android.app.NotificationManager nm =
+                        (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                return nm == null || nm.areNotificationsEnabled();
+            } catch (Exception e) {
+                return true;
+            }
+        }
+
         /** Bu cihazın FCM token'ı (yoksa boş). */
         @JavascriptInterface
         public String getFcmToken() {
@@ -511,6 +621,22 @@ public class MainActivity extends Activity {
                 toast("Kaydedilemedi: " + e.getMessage());
             }
         }
+    }
+
+    /** Giriş yapılınca bir kez: pil optimizasyonundan muaf tutmayı iste (bildirimler kesilmesin). */
+    private void askBatteryOptimization() {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                if (!visible || Build.VERSION.SDK_INT < 23) return;
+                if (Session.askedOnce(this, "battery")) return;
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+                Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+            } catch (Exception ignored) {
+            }
+        }, 4000);
     }
 
     private void toast(final String msg) {

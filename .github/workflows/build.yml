@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,11 +27,47 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      # Sabit imza anahtarı (isteğe bağlı): Settings > Secrets > Actions içinde
+      # FQ_KEYSTORE_B64 ve FQ_KEYSTORE_PASSWORD varsa release APK bu anahtarla imzalanır.
+      - name: Prepare signing key
+        env:
+          KS_B64: ${{ secrets.FQ_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/flinq.jks"
+            echo "FQ_KEYSTORE_FILE=$RUNNER_TEMP/flinq.jks" >> "$GITHUB_ENV"
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build APK
+        env:
+          FQ_KEYSTORE_PASSWORD: ${{ secrets.FQ_KEYSTORE_PASSWORD }}
+          FQ_KEY_ALIAS: ${{ secrets.FQ_KEY_ALIAS }}
+          FQ_KEY_PASSWORD: ${{ secrets.FQ_KEY_PASSWORD }}
+        run: |
+          if [ "$SIGNED" = "1" ]; then
+            gradle assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk FlinQ.apk
+          else
+            gradle assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk FlinQ.apk
+          fi
+          VN=$(grep -oP 'versionName "\K[^"]+' app/build.gradle)
+          echo "VERSION_NAME=$VN" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: FlinQ-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: FlinQ.apk
+
+      # Her derleme GitHub Releases'a da yüklenir:
+      # https://github.com/XADAN-900/FlinQ/releases/latest/download/FlinQ.apk
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}-${{ github.run_number }}
+          name: FlinQ ${{ env.VERSION_NAME }} (derleme ${{ github.run_number }})
+          body: "FlinQ Android APK. Telefona indirip kurun."
+          files: FlinQ.apk
+          make_latest: true

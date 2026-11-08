@@ -19,3 +19,13 @@ HTML uygulaması `app/src/main/assets/www/index.html`; cihazda `http://localhost
 5. Push et: "Build APK" APK'yı, "Deploy Functions" sunucu kısmını kurar.
 
 Giriş yapamazsan: Google Cloud konsol → API anahtarı kısıtlamalarında `localhost` engelleniyor olabilir.
+
+
+## 1.1.0 — Bildirim ve güvenlik güncellemesi
+- **Uygulama kapalıyken bildirim:** Firebase FCM kurulu olmasa bile arka plan servisi bildirimleri canlı dinler (Realtime Database akışı + oturum anahtarı). Telefon yeniden başlayınca da devam eder.
+- **Sesli bildirim:** FlinQ'ya özel bildirim sesi + titreşim; ses kapatılabilir. Uygulama açıkken yeni bildirim gelince ses + üstte kısa bildirim.
+- **Kilit ekranı:** içerik göster/gizle ayarı, kişinin harfli avatarı, **Görüntüle** ve **Okundu** butonları, bildirime dokununca Bildirimler paneli açılır.
+- **Ayarlar > Bildirimler:** aç/kapat, ses, kilit ekranı, "Bildirimi dene", telefon bildirim ayarlarına kısayol.
+- **Güvenlik:** kullanıcı adı ve yorumlar bildirimlerde kod olarak çalışabiliyordu (XSS) — düzeltildi; eski kayıtlar da güvenli gösterilir.
+- **Kullanıcı adı kuralı:** 3-20 karakter, harf/rakam/_ (veritabanı yolunu bozan karakterler engellendi).
+- APK her derlemede Releases'a yüklenir: `releases/latest/download/FlinQ.apk`. İsteğe bağlı sabit imza: `FQ_KEYSTORE_B64`, `FQ_KEYSTORE_PASSWORD`.
